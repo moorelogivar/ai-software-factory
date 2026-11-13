@@ -10,14 +10,20 @@ export interface ProjectResolverConfig {
   projectsRoot?: string;
 }
 
+// Akar folder tempat seluruh project yang dikelola factory disimpan.
+export function resolveProjectsRoot(): string {
+  return path.resolve(
+    process.env.AI_FACTORY_PROJECTS_ROOT ??
+      path.join(process.cwd(), "projects"),
+  );
+}
+
 export class ProjectDirectoryResolver {
   private readonly projectsRoot: string;
 
   constructor(config: ProjectResolverConfig = {}) {
     this.projectsRoot = path.resolve(
-      config.projectsRoot ??
-      process.env.AI_FACTORY_PROJECTS_ROOT ??
-      path.join(process.cwd(), "projects"),
+      config.projectsRoot ?? resolveProjectsRoot(),
     );
   }
 
@@ -47,7 +53,12 @@ export class ProjectDirectoryResolver {
       );
     }
 
-    const root = await realpath(this.projectsRoot);
+    const root = await realpath(this.projectsRoot).catch(() => {
+      throw new Error(
+        `Folder projects tidak ditemukan: ${this.projectsRoot}. ` +
+        `Buat folder tersebut atau set AI_FACTORY_PROJECTS_ROOT.`,
+      );
+    });
 
     const requestedPath = path.isAbsolute(project.repositoryPath)
       ? path.resolve(project.repositoryPath)

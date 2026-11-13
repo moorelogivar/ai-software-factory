@@ -45,6 +45,25 @@ export type ProjectStatus = FactoryProject["status"];
 export type ExecutionStatus = Execution["status"];
 
 // ========================================
+// PROJECT MANAGER TYPES
+// ========================================
+
+export type CreateProjectInput = Pick<
+  NewFactoryProject,
+  "name" | "slug"
+> &
+  Partial<
+    Pick<
+      NewFactoryProject,
+      | "description"
+      | "repositoryUrl"
+      | "repositoryPath"
+      | "defaultBranch"
+      | "status"
+    >
+  >;
+
+// ========================================
 // TASK MANAGER TYPES
 // ========================================
 
