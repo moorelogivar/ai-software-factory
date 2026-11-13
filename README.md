@@ -105,6 +105,24 @@ kecuali memakai flag `--backlog`.
 | `OPENCODE_BIN` | `opencode` | Path binary OpenCode |
 | `AI_FACTORY_PROJECTS_ROOT` | `<repo>/projects` | Akar folder project |
 
+## Retry dan fallback model
+
+Model gratis punya kuota terbatas dan bisa habis sewaktu-waktu. Sistem
+menangani ini dua tingkat:
+
+1. **Fallback model.** `cli-adapter` mencoba model utama agent, lalu
+   model cadangan dari `packages/model-router` satu per satu tanpa jeda
+   (kuota tiap model terpisah). Bila salah satu berhasil, task langsung
+   selesai.
+2. **Retry terjadwal.** Bila semua model gagal, task kembali ke antrean
+   dengan `scheduledAt` di masa depan — memakai `retryAfterMs` terpanjang
+   yang dilaporkan provider. Scheduler tidak akan mengambilnya sebelum
+   waktu itu tiba. Agent dilepas ke `idle` dan percobaan dihitung.
+
+Retry berhenti bila `maxAttempts` sudah habis; task lalu ditandai `failed`
+permanen. Kegagalan yang tidak bersifat sementara (mis. kesalahan prompt)
+tidak di-retry sama sekali.
+
 ## Batasan yang diketahui
 
 - **Sandboxing bersifat advisory.** Working directory agent dipaksa ke dalam
@@ -117,3 +135,7 @@ kecuali memakai flag `--backlog`.
 - **Batas concurrency agent bersifat global.** Satu project bisa tertahan
   bila project lain sedang menjalankan agent, meski `factory run` sudah
   dibatasi ke project masing-masing.
+- **Dependency task belum dihiraukan scheduler.** Kolom `parentTaskId`
+  ada di schema, tapi task anak bisa berjalan sebelum induknya selesai.
+- **Budget token/biaya belum dibatasi.** Biaya dicatat, tapi tidak ada
+  pembatasan per project.
