@@ -301,7 +301,7 @@ export class TaskManager {
       .update(tasks)
       .set({
         status: "queued",
-        attempts: attemptsUsed,
+        attempts: sql`${tasks.attempts} + 1`,
         scheduledAt,
         assignedAgentId: null,
         startedAt: null,
