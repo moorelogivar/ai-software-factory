@@ -1,5 +1,6 @@
 import { syncAgents } from "../../../packages/orchestrator/src/agent-sync";
 import { agentRegistry } from "../../../packages/orchestrator/src/agent-registry";
+import { closeDatabase } from "../../../packages/database/src/client";
 import { Command } from "commander";
 import { createConnection } from "node:net";
 import { execFile } from "node:child_process";
@@ -165,7 +166,16 @@ agentsCommand
   });
 
 
-program.parseAsync(process.argv).catch((error: unknown) => {
-  console.error("CLI error:", error);
-  process.exitCode = 1;
-});
+async function main(): Promise<void> {
+  try {
+    await program.parseAsync(process.argv);
+  } catch (error: unknown) {
+    console.error("CLI error:", error);
+    process.exitCode = 1;
+  } finally {
+    // Tutup pool PostgreSQL agar proses tidak menggantung sampai idle timeout.
+    await closeDatabase();
+  }
+}
+
+void main();

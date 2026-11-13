@@ -5,3 +5,7 @@ node_modules/
 dist/
 logs/
 *.log
+
+# Project yang dikelola factory adalah repository terpisah (git repo sendiri).
+projects/*
+!projects/.gitkeep

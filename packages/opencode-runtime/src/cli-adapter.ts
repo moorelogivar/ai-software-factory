@@ -33,7 +33,7 @@ interface OpenCodeEvent {
 
 function parseOutput(stdout: string) {
   let sessionID: string | undefined;
-  let textOutput = "";
+  const textParts: string[] = [];
   let inputTokens = 0;
   let outputTokens = 0;
   let cost = 0;
@@ -54,7 +54,7 @@ function parseOutput(stdout: string) {
       }
 
       if (event.type === "text" && event.part?.text) {
-        textOutput += event.part.text;
+        textParts.push(event.part.text);
       }
 
       if (event.type === "step_finish" && event.part) {
@@ -82,7 +82,7 @@ function parseOutput(stdout: string) {
 
   return {
     sessionID,
-    text: textOutput,
+    text: textParts.join("\n\n"),
     inputTokens,
     outputTokens,
     cost,
@@ -177,6 +177,7 @@ export class OpenCodeCLIAdapter {
       let stderr = "";
       let settled = false;
       let timedOut = false;
+      let truncated = false;
 
       const appendOutput = (
         current: string,
@@ -185,7 +186,14 @@ export class OpenCodeCLIAdapter {
         const remaining =
           this.maxOutputBytes - Buffer.byteLength(current);
 
-        if (remaining <= 0) return current;
+        if (remaining <= 0) {
+          truncated = true;
+          return current;
+        }
+
+        if (chunk.length > remaining) {
+          truncated = true;
+        }
 
         return current + chunk
           .subarray(0, remaining)
@@ -235,6 +243,19 @@ export class OpenCodeCLIAdapter {
           return;
         }
 
+        // Output yang terpotong berarti event terakhir (jawaban akhir)
+        // bisa hilang. Jangan tandai task sukses, karena hasilnya parsial.
+        if (truncated) {
+          finish({
+            success: false,
+            error:
+              `Output OpenCode melebihi batas ${this.maxOutputBytes} byte ` +
+              `dan dipotong. Hasil eksekusi tidak dapat dipercaya.`,
+            output: { stdout, stderr, truncated: true },
+          });
+          return;
+        }
+
         let parsed;
 
         try {
@@ -245,6 +266,17 @@ export class OpenCodeCLIAdapter {
             error: error instanceof Error
               ? error.message
               : String(error),
+            output: { stdout, stderr },
+          });
+          return;
+        }
+
+        if (parsed.events.length === 0) {
+          finish({
+            success: false,
+            error:
+              "OpenCode tidak menghasilkan event apa pun. " +
+              "Kemungkinan format output tidak dikenali.",
             output: { stdout, stderr },
           });
           return;
