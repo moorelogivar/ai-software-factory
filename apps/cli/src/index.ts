@@ -2,7 +2,9 @@ import { syncAgents } from "../../../packages/orchestrator/src/agent-sync";
 import { agentRegistry } from "../../../packages/orchestrator/src/agent-registry";
 import { projectManager } from "../../../packages/orchestrator/src/project-manager";
 import { taskManager } from "../../../packages/orchestrator/src/task-manager";
+import { OrchestratorCore } from "../../../packages/orchestrator/src/orchestrator";
 import { closeDatabase } from "../../../packages/database/src/client";
+import { openCodeExecutor } from "../../../packages/opencode-runtime/src/index";
 import {
   resolveProjectsRoot,
 } from "../../../packages/opencode-runtime/src/project-resolver";
@@ -118,6 +120,22 @@ async function runStatus(): Promise<void> {
   if (online !== results.length) {
     process.exitCode = 1;
   }
+
+  await printOrchestratorStatus();
+}
+
+async function printOrchestratorStatus(): Promise<void> {
+  const orchestrator = new OrchestratorCore(openCodeExecutor);
+  const status = await orchestrator.getStatus();
+
+  console.log("ORCHESTRATOR");
+  console.log("==============================");
+  console.log(`Running          : ${status.running}`);
+  console.log(`Active agents    : ${status.activeAgents}`);
+  console.log(`Queued tasks     : ${status.queuedTasks}`);
+  console.log(`Completed tasks  : ${status.completedTasks}`);
+  console.log(`Failed tasks     : ${status.failedTasks}`);
+  console.log("==============================\n");
 }
 
 program
@@ -407,6 +425,102 @@ taskCommand
     }
 
     console.log("==============================\n");
+  });
+
+// ========================================
+// RUN
+// ========================================
+
+program
+  .command("run")
+  .description("Run the orchestrator to execute queued tasks")
+  .argument("<project>", "Project slug")
+  .option("--once", "Run a single scheduling cycle, then exit")
+  .option(
+    "-c, --max-concurrent <count>",
+    "Maximum number of concurrent agents",
+    "2",
+  )
+  .option(
+    "-i, --poll-ms <ms>",
+    "Polling interval in milliseconds",
+    "3000",
+  )
+  .action(async (
+    projectSlug: string,
+    options: {
+      once?: boolean;
+      maxConcurrent: string;
+      pollMs: string;
+    },
+  ) => {
+    const project = await projectManager.requireBySlug(projectSlug);
+
+    const maxConcurrent = z.coerce
+      .number()
+      .int()
+      .min(1)
+      .max(16)
+      .parse(options.maxConcurrent);
+
+    const pollingIntervalMs = z.coerce
+      .number()
+      .int()
+      .min(100)
+      .parse(options.pollMs);
+
+    const orchestrator = new OrchestratorCore(openCodeExecutor, {
+      maxConcurrentAgents: maxConcurrent,
+      maxConcurrentAgentsPerProject: maxConcurrent,
+      pollingIntervalMs,
+    });
+
+    console.log("\nORCHESTRATOR STARTED");
+    console.log("==============================");
+    console.log(`Project            : ${project.slug}`);
+    console.log(`Max concurrent     : ${maxConcurrent}`);
+    console.log(`Polling interval   : ${pollingIntervalMs}ms`);
+    console.log("==============================\n");
+
+    if (options.once) {
+      await orchestrator.runOnce();
+      await printOrchestratorStatus();
+      return;
+    }
+
+    await orchestrator.start();
+
+    const ticker = setInterval(() => {
+      void printOrchestratorStatus();
+    }, 5000);
+
+    let stopping = false;
+
+    const shutdown = async (): Promise<void> => {
+      if (stopping) return;
+      stopping = true;
+
+      clearInterval(ticker);
+
+      console.log("\nMenghentikan orchestrator...");
+
+      await orchestrator.stop();
+      await printOrchestratorStatus();
+      await closeDatabase();
+
+      process.exit(0);
+    };
+
+    process.on("SIGINT", () => {
+      void shutdown();
+    });
+
+    process.on("SIGTERM", () => {
+      void shutdown();
+    });
+
+    // Tahan proses sampai menerima sinyal penghentian.
+    await new Promise<void>(() => {});
   });
 
 async function main(): Promise<void> {

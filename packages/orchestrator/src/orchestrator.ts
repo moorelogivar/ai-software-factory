@@ -275,6 +275,14 @@ export class OrchestratorCore {
     );
   }
 
+  // Jalankan satu siklus penjadwalan, lalu tunggu sampai seluruh
+  // eksekusi yang sedang berjalan selesai. Dipakai untuk mode --once
+  // supaya perilakunya deterministik dan bisa diuji.
+  async runOnce(): Promise<void> {
+    await this.poll();
+    await this.waitForIdle();
+  }
+
   async getStatus(): Promise<OrchestratorStatus> {
     const [
       activeAgents,
