@@ -115,6 +115,9 @@ export interface OrchestratorConfig {
   maxConcurrentAgents: number;
   maxConcurrentAgentsPerProject: number;
   pollingIntervalMs: number;
+  // Batasi penjadwalan hanya untuk satu project. Kosongkan untuk
+  // menjadwalkan seluruh project yang ada.
+  projectId?: string;
 }
 
 export interface OrchestratorStatus {

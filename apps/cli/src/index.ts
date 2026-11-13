@@ -473,6 +473,8 @@ program
       maxConcurrentAgents: maxConcurrent,
       maxConcurrentAgentsPerProject: maxConcurrent,
       pollingIntervalMs,
+      // Hanya jalankan task milik project ini.
+      projectId: project.id,
     });
 
     console.log("\nORCHESTRATOR STARTED");

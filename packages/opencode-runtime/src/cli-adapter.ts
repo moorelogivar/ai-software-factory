@@ -31,7 +31,7 @@ interface OpenCodeEvent {
   error?: unknown;
 }
 
-function parseOutput(stdout: string) {
+export function parseOutput(stdout: string) {
   let sessionID: string | undefined;
   const textParts: string[] = [];
   let inputTokens = 0;

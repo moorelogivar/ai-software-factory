@@ -96,6 +96,11 @@ export class TaskScheduler {
         .where(
           and(
             eq(tasks.status, "queued"),
+            // Batasi ke satu project bila scheduler dijalankan
+            // untuk project tertentu.
+            this.config.projectId
+              ? eq(tasks.projectId, this.config.projectId)
+              : undefined,
             or(
               isNull(tasks.scheduledAt),
               lte(tasks.scheduledAt, now),
