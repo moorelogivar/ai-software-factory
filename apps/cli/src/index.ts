@@ -491,7 +491,9 @@ program
     await orchestrator.start();
 
     const ticker = setInterval(() => {
-      void printOrchestratorStatus();
+      void printOrchestratorStatus().catch((error: unknown) => {
+        console.error("Gagal membaca status orchestrator:", error);
+      });
     }, 5000);
 
     let stopping = false;
