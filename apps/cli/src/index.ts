@@ -523,11 +523,31 @@ program
     await new Promise<void>(() => {});
   });
 
+function printError(error: unknown): void {
+  if (error instanceof z.ZodError) {
+    console.error("Input tidak valid:");
+
+    for (const issue of error.issues) {
+      const field = issue.path.join(".") || "(nilai utama)";
+      console.error(`  - ${field}: ${issue.message}`);
+    }
+
+    return;
+  }
+
+  if (error instanceof Error) {
+    console.error(`Error: ${error.message}`);
+    return;
+  }
+
+  console.error("Error:", error);
+}
+
 async function main(): Promise<void> {
   try {
     await program.parseAsync(process.argv);
   } catch (error: unknown) {
-    console.error("CLI error:", error);
+    printError(error);
     process.exitCode = 1;
   } finally {
     // Tutup pool PostgreSQL agar proses tidak menggantung sampai idle timeout.
