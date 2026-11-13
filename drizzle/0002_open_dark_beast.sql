@@ -1,0 +1,2 @@
+ALTER TABLE "tasks" ADD CONSTRAINT "tasks_parent_task_id_tasks_id_fk" FOREIGN KEY ("parent_task_id") REFERENCES "public"."tasks"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "artifacts" ADD CONSTRAINT "artifacts_size_bytes_check" CHECK ("artifacts"."size_bytes" IS NULL OR "artifacts"."size_bytes" >= 0);

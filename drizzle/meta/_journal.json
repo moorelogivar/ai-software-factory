@@ -1,0 +1,27 @@
+{
+  "version": "7",
+  "dialect": "postgresql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1794502919313,
+      "tag": "0000_yellow_boom_boom",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1794503033622,
+      "tag": "0001_workable_norrin_radd",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1794503621387,
+      "tag": "0002_open_dark_beast",
+      "breakpoints": true
+    }
+  ]
+}
