@@ -137,7 +137,6 @@ export class OrchestratorCore {
 
     let executionId: string | undefined;
     let sessionID: string | undefined;
-    let taskStarted = false;
 
     try {
       const startedTask = await taskManager.start(task.id);
@@ -145,8 +144,6 @@ export class OrchestratorCore {
       if (!startedTask) {
         throw new Error(`Task ${task.id} gagal dimulai`);
       }
-
-      taskStarted = true;
 
       const execution = await executionManager.start(
         startedTask,
@@ -256,15 +253,18 @@ export class OrchestratorCore {
         }
       }
 
-      if (taskStarted) {
-        try {
-          await taskManager.fail(task.id, message);
-        } catch (failError) {
-          console.error(
-            `[Orchestrator] Gagal memperbarui task:`,
-            failError,
-          );
-        }
+      // Task sudah di-reserve agent oleh scheduler. Baik itu gagal
+      // sebelum atau sesudah start(), task harus selalu ditandai failed
+      // supaya agent dilepas kembali ke status idle. Kalau dilewati, agent
+      // akan tetap 'busy' selamanya dan role tersebut tidak bisa
+      // dijadwalkan lagi.
+      try {
+        await taskManager.fail(task.id, message);
+      } catch (failError) {
+        console.error(
+          `[Orchestrator] Gagal memperbarui task:`,
+          failError,
+        );
       }
     }
   }
