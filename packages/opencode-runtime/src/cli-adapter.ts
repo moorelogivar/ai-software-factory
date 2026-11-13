@@ -372,6 +372,7 @@ export class OpenCodeCLIAdapter {
           outputTokens: parsed.outputTokens,
           cost: parsed.cost,
           events: parsed.events,
+          model,
           stderr,
           exitCode: code,
         };

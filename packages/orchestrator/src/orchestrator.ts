@@ -188,6 +188,7 @@ export class OrchestratorCore {
           outputTokens: getNumber(output, "outputTokens"),
           cost: getNumber(output, "cost"),
           metadata: {
+            model: getOutputValue(output, "model") ?? null,
             events: getOutputValue(output, "events") ?? [],
             exitCode: getOutputValue(output, "exitCode") ?? null,
             text: getOutputValue(output, "text") ?? null,
