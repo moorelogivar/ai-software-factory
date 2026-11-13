@@ -78,6 +78,16 @@ pnpm factory run demo                        # loop sampai Ctrl+C
 Role agent yang tersedia: `planner`, `architect`, `developer`, `reviewer`,
 `tester`, `devops`.
 
+## Pengembangan
+
+```bash
+pnpm run typecheck    # tsc --noEmit, strict mode
+pnpm test             # vitest run
+```
+
+Test suite memakai PostgreSQL lokal dan membersihkan datanya sendiri,
+jadi tidak boleh dijalankan bersamaan dengan instance factory lain.
+
 ## Task
 
 Setiap task harus punya `input.requiredRole` agar scheduler tahu agent mana
@@ -104,3 +114,6 @@ kecuali memakai flag `--backlog`.
 - **`artifacts`, `deployments`, dan `audit_logs`** belum ditulis kode.
 - **Role `orchestrator`** ada di daftar valid scheduler, tapi belum ada di
   enum database.
+- **Batas concurrency agent bersifat global.** Satu project bisa tertahan
+  bila project lain sedang menjalankan agent, meski `factory run` sudah
+  dibatasi ke project masing-masing.
