@@ -273,6 +273,83 @@ export class TaskManager {
       return task;
     });
   }
+
+  // Kembalikan task ke antrean setelah kegagalan sementara.
+  // Bila sisa percobaan sudah habis, task ditandai failed permanen.
+  async retry(
+    id: string,
+    reason: string,
+    retryAfterMs = DEFAULT_RETRY_DELAY_MS,
+  ): Promise<Task> {
+    const task = await this.getById(id);
+
+    if (!task) {
+      throw new Error(`Task tidak ditemukan: ${id}`);
+    }
+
+    const attemptsUsed = task.attempts + 1;
+
+    if (attemptsUsed >= (task.maxAttempts ?? 3)) {
+      return this.fail(id, reason);
+    }
+
+    const scheduledAt = new Date(
+      Date.now() + Math.max(retryAfterMs, 0),
+    );
+
+    const [retried] = await db
+      .update(tasks)
+      .set({
+        status: "queued",
+        attempts: attemptsUsed,
+        scheduledAt,
+        assignedAgentId: null,
+        startedAt: null,
+        result: {
+          success: false,
+          error: reason,
+          retry: true,
+          retryAfterMs,
+          nextAttemptAt: scheduledAt.toISOString(),
+        },
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(tasks.id, id),
+          inArray(tasks.status, ["assigned", "running", "failed"]),
+        ),
+      )
+      .returning();
+
+    if (!retried) {
+      throw new Error(
+        "Task tidak ditemukan atau tidak dapat dijadwalkan ulang",
+      );
+    }
+
+    // Lepas agent yang sebelumnya mengerjakan task ini.
+    if (task.assignedAgentId) {
+      await db
+        .update(agents)
+        .set({
+          status: "idle",
+          updatedAt: new Date(),
+        })
+        .where(
+          and(
+            eq(agents.id, task.assignedAgentId),
+            eq(agents.status, "busy"),
+          ),
+        );
+    }
+
+    return retried;
+  }
 }
+
+// Tunggu default sebelum mencoba lagi, bila provider tidak
+// memberikan `retryAfterMs`.
+const DEFAULT_RETRY_DELAY_MS = 60_000;
 
 export const taskManager = new TaskManager();

@@ -1,6 +1,11 @@
 
 import { spawn } from "node:child_process";
 
+import {
+  buildModelQueue,
+  toProviderModel,
+} from "../../model-router/src/index";
+
 import type {
   Agent,
   Task,
@@ -11,6 +16,9 @@ export interface OpenCodeAdapterConfig {
   binary?: string;
   timeoutMs?: number;
   maxOutputBytes?: number;
+  // Model cadangan yang dipakai bila model utama gagal. Kosongkan untuk
+  // memakai daftar model gratis dari model-router.
+  fallbackModels?: string[];
   resolveProjectDirectory: (
     projectId: string,
   ) => Promise<string>;
@@ -31,13 +39,70 @@ interface OpenCodeEvent {
   error?: unknown;
 }
 
-export function parseOutput(stdout: string) {
+export interface OpenCodeErrorDetail {
+  type?: string;
+  message?: string;
+  status?: number;
+  retryAfterMs?: number;
+  raw: unknown;
+}
+
+export interface ParseResult {
+  sessionID: string | undefined;
+  text: string;
+  inputTokens: number;
+  outputTokens: number;
+  cost: number;
+  events: string[];
+  error: OpenCodeErrorDetail | undefined;
+}
+
+function readErrorDetail(error: unknown): OpenCodeErrorDetail {
+  if (!error || typeof error !== "object") {
+    return { raw: error };
+  }
+
+  const record = error as Record<string, unknown>;
+
+  return {
+    type: typeof record.type === "string" ? record.type : undefined,
+    message:
+      typeof record.message === "string" ? record.message : undefined,
+    status: typeof record.status === "number" ? record.status : undefined,
+    retryAfterMs:
+      typeof record.retryAfterMs === "number"
+        ? record.retryAfterMs
+        : undefined,
+    raw: error,
+  };
+}
+
+// Error yang bersifat sementara: kuota model habis atau rate limit.
+// Layak dicoba lagi baik dengan model lain maupun dengan menunggu.
+function isRetryableError(detail: OpenCodeErrorDetail): boolean {
+  if (detail.type === "provider.free-limit") return true;
+
+  if (detail.type === "provider.rate-limit") return true;
+
+  if (detail.status === 429 || detail.status === 503) return true;
+
+  const message = detail.message?.toLowerCase() ?? "";
+
+  return (
+    message.includes("rate limit") ||
+    message.includes("free usage limit") ||
+    message.includes("overloaded")
+  );
+}
+
+export function parseOutput(stdout: string): ParseResult {
   let sessionID: string | undefined;
   const textParts: string[] = [];
   let inputTokens = 0;
   let outputTokens = 0;
   let cost = 0;
   const events: string[] = [];
+  let error: OpenCodeErrorDetail | undefined;
 
   for (const line of stdout.split(/\r?\n/)) {
     if (!line.trim()) continue;
@@ -64,18 +129,9 @@ export function parseOutput(stdout: string) {
       }
 
       if (event.type === "error") {
-        throw new Error(
-          `OpenCode reported an error: ${JSON.stringify(event.error ?? event.part)}`,
-        );
+        error = readErrorDetail(event.error ?? event.part);
       }
-    } catch (error) {
-      if (
-        error instanceof Error &&
-        error.message.startsWith("OpenCode reported an error:")
-      ) {
-        throw error;
-      }
-
+    } catch {
       // Abaikan baris yang bukan JSON valid.
     }
   }
@@ -87,6 +143,7 @@ export function parseOutput(stdout: string) {
     outputTokens,
     cost,
     events,
+    error,
   };
 }
 
@@ -115,11 +172,60 @@ export class OpenCodeCLIAdapter {
 
       const prompt = this.buildPrompt(task, agent);
 
-      return await this.runProcess(
-        workingDirectory,
-        prompt,
-        agent,
-      );
+      const modelQueue = buildModelQueue({
+        primary: agent.model,
+        provider: agent.provider,
+        fallbacks: this.config.fallbackModels,
+      });
+
+      let lastFailure: TaskResult | undefined;
+      let longestWaitMs = 0;
+
+      // Coba model utama dulu, lalu model cadangan satu per satu.
+      // Berpindah model tidak menunggu apa pun karena kuota tiap model
+      // terpisah; menunggu hanya diperlukan bila semua model gagal.
+      for (const model of modelQueue) {
+        const result = await this.runProcess(
+          workingDirectory,
+          prompt,
+          agent,
+          model,
+        );
+
+        if (result.success) {
+          return result;
+        }
+
+        lastFailure = result;
+
+        if (result.retryable) {
+          longestWaitMs = Math.max(
+            longestWaitMs,
+            result.retryAfterMs ?? 0,
+          );
+        } else {
+          // Kegagalan permanen, pindah model tidak akan membantu.
+          break;
+        }
+      }
+
+      if (lastFailure?.retryable) {
+        // Semua model gagal. Serahkan penjadwalan ulang ke orchestrator,
+        // yang akan memilih waktu tunggu terpanjang dari semua model.
+        return {
+          ...lastFailure,
+          output: {
+            ...lastFailure.output,
+            attemptedModels: modelQueue,
+          },
+          retryAfterMs: longestWaitMs,
+        };
+      }
+
+      return lastFailure ?? {
+        success: false,
+        error: "Tidak ada model yang dapat dijalankan",
+      };
     } catch (error) {
       return {
         success: false,
@@ -156,12 +262,13 @@ export class OpenCodeCLIAdapter {
     workingDirectory: string,
     prompt: string,
     agent: Agent,
+    model: string,
   ): Promise<TaskResult> {
     return new Promise((resolve) => {
       const args = [
         "run",
         "--agent", agent.name,
-        "--model", `${agent.provider}/${agent.model}`,
+        "--model", toProviderModel(agent.provider, model),
         "--format", "json",
         prompt,
       ];
@@ -256,17 +363,32 @@ export class OpenCodeCLIAdapter {
           return;
         }
 
-        let parsed;
+        const parsed: ParseResult = parseOutput(stdout);
 
-        try {
-          parsed = parseOutput(stdout);
-        } catch (error) {
+        const output = {
+          sessionID: parsed.sessionID,
+          text: parsed.text,
+          inputTokens: parsed.inputTokens,
+          outputTokens: parsed.outputTokens,
+          cost: parsed.cost,
+          events: parsed.events,
+          stderr,
+          exitCode: code,
+        };
+
+        // OpenCode melaporkan kegagalan lewat event `error`.
+        if (parsed.error) {
+          const detail = parsed.error;
+          const retryable = isRetryableError(detail);
+
           finish({
             success: false,
-            error: error instanceof Error
-              ? error.message
-              : String(error),
-            output: { stdout, stderr },
+            error:
+              `OpenCode reported an error: ` +
+              JSON.stringify(detail.raw),
+            retryable,
+            retryAfterMs: detail.retryAfterMs,
+            output,
           });
           return;
         }
@@ -281,17 +403,6 @@ export class OpenCodeCLIAdapter {
           });
           return;
         }
-
-        const output = {
-          sessionID: parsed.sessionID,
-          text: parsed.text,
-          inputTokens: parsed.inputTokens,
-          outputTokens: parsed.outputTokens,
-          cost: parsed.cost,
-          events: parsed.events,
-          stderr,
-          exitCode: code,
-        };
 
         if (code !== 0) {
           finish({

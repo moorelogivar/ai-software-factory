@@ -208,6 +208,29 @@ export class OrchestratorCore {
         console.log(
           `[Orchestrator] Task ${task.id} completed`,
         );
+      } else if (result.retryable) {
+        const reason = result.error ?? "Task execution failed";
+
+        const retried = await taskManager.retry(
+          task.id,
+          reason,
+          result.retryAfterMs,
+        );
+
+        // Bila sisa percobaan sudah habis, retry() mengembalikan task
+        // berstatus failed.
+        if (retried.status === "failed") {
+          console.error(
+            `[Orchestrator] Task ${task.id} gagal permanen ` +
+            `setelah ${retried.attempts} percobaan: ${reason}`,
+          );
+        } else {
+          console.warn(
+            `[Orchestrator] Task ${task.id} dijadwalkan ulang ` +
+            `(percobaan ${retried.attempts}) pada ` +
+            `${retried.scheduledAt?.toISOString() ?? "n/a"}`,
+          );
+        }
       } else {
         await taskManager.fail(
           task.id,

@@ -92,6 +92,12 @@ export interface TaskResult {
   success: boolean;
   output?: Record<string, unknown>;
   error?: string;
+  // Bila true, kegagalan ini bersifat sementara (mis. kuota model habis)
+  // dan task boleh dijadwalkan ulang.
+  retryable?: boolean;
+  // Durasi tunggu sebelum task dijadwalkan ulang, diambil dari
+  // `retryAfterMs` yang dilaporkan provider model.
+  retryAfterMs?: number;
 }
 
 // ========================================

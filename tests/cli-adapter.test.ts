@@ -69,14 +69,37 @@ describe("parseOutput", () => {
     expect(parsed.events).toEqual(["text"]);
   });
 
-  it("melempar error saat OpenCode melaporkan kegagalan", () => {
+  it("menangkap error OpenCode sebagai detail terstruktur", () => {
+    const stdout = [
+      line({
+        type: "error",
+        sessionID: "ses_abc",
+        error: {
+          type: "provider.free-limit",
+          message: "Free usage limit reached",
+          status: 429,
+          retryAfterMs: 60000,
+        },
+      }),
+    ].join("\n");
+
+    const parsed = parseOutput(stdout);
+
+    expect(parsed.error?.type).toBe("provider.free-limit");
+    expect(parsed.error?.status).toBe(429);
+    expect(parsed.error?.retryAfterMs).toBe(60000);
+  });
+
+  it("mengabaikan baris error yang bukan objek", () => {
     const stdout = line({
       type: "error",
       sessionID: "ses_abc",
-      error: { message: "rate limited" },
+      error: "gagal total",
     });
 
-    expect(() => parseOutput(stdout)).toThrow(/rate limited/);
+    const parsed = parseOutput(stdout);
+
+    expect(parsed.error?.raw).toBe("gagal total");
   });
 
   it("mengembalikan daftar event untuk audit", () => {

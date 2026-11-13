@@ -1,6 +1,7 @@
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 
-import { closeDatabase } from "../packages/database/src/client";
+import { closeDatabase, db } from "../packages/database/src/client";
+import { tasks } from "../packages/database/src/schema";
 import { taskManager } from "../packages/orchestrator/src/task-manager";
 
 import {
@@ -199,6 +200,100 @@ describe("TaskManager", () => {
     await expect(taskManager.start(task.id)).rejects.toThrow(
       /di-assign/,
     );
+  });
+
+  it("retry mengembalikan task ke antrean dengan jadwal tunggu", async () => {
+    const projectId = await newProject("tm-retry");
+
+    const agent = await getIdleAgent("tester");
+
+    if (!agent) {
+      throw new Error("Agent tester tidak ditemukan");
+    }
+
+    touchedAgentIds.push(agent.id);
+
+    const task = await taskManager.create({
+      projectId,
+      title: "Task untuk di-retry",
+    });
+
+    await taskManager.enqueue(task.id);
+    await taskManager.assign(task.id, agent.id);
+    await taskManager.start(task.id);
+
+    const retried = await taskManager.retry(task.id, "rate limit", 5000);
+
+    expect(retried.status).toBe("queued");
+    expect(retried.attempts).toBe(1);
+    expect(retried.assignedAgentId).toBeNull();
+
+    // scheduledAt di masa depan.
+    expect(retried.scheduledAt).toBeInstanceOf(Date);
+    expect(retried.scheduledAt!.getTime()).toBeGreaterThan(
+      Date.now() - 1000,
+    );
+
+    // Agent dilepas supaya bisa mengerjakan task lain.
+    const released = await getIdleAgent("tester");
+
+    expect(released?.status).toBe("idle");
+
+    // Status backlog task masih terbaca lewat listByProject.
+    const queued = await taskManager.listByProject(projectId, "queued");
+
+    expect(queued).toHaveLength(1);
+    expect(queued[0]?.title).toBe("Task untuk di-retry");
+  });
+
+  it("retry berhenti dan menandai failed bila percobaan habis", async () => {
+    const projectId = await newProject("tm-retry-habis");
+
+    const agent = await getIdleAgent("reviewer");
+
+    if (!agent) {
+      throw new Error("Agent reviewer tidak ditemukan");
+    }
+
+    touchedAgentIds.push(agent.id);
+
+    const [task] = await db
+      .insert(tasks)
+      .values({
+        projectId,
+        title: "Task tanpa sisa percobaan",
+        status: "running",
+        attempts: 2,
+        maxAttempts: 3,
+        assignedAgentId: agent.id,
+      })
+      .returning();
+
+    if (!task) {
+      throw new Error("Gagal membuat task untuk test");
+    }
+
+    const result = await taskManager.retry(task.id, "masih gagal", 1000);
+
+    expect(result.status).toBe("failed");
+    expect(result.attempts).toBe(3);
+
+    const released = await getIdleAgent("reviewer");
+
+    expect(released?.status).toBe("idle");
+  });
+
+  it("retry ditolak pada task yang tidak sedang aktif", async () => {
+    const projectId = await newProject("tm-retry-invalid");
+
+    const task = await taskManager.create({
+      projectId,
+      title: "Task backlog",
+    });
+
+    await expect(
+      taskManager.retry(task.id, "coba"),
+    ).rejects.toThrow(/tidak dapat dijadwalkan ulang/);
   });
 
   it("listByProject memfilter berdasarkan status", async () => {
